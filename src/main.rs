@@ -5,10 +5,15 @@ use std::collections::VecDeque;
 // Each position uses i8 (avoiding casting hell), hence the map cannot exceed 127×127 size.
 type Pos = (i8, i8);
 type BoxOrGoal = SmallVec<[Pos; 15]>;
-type Path = SmallVec<[char; 64]>;
+type Path = SmallVec<[u8; 64]>;
 
 const MAX_SIZE: usize = 127;
-const DIRECTIONS: [(i8, i8, char); 4] = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'), (0, -1, 'L')];
+const DIRECTIONS: [(i8, i8, u8); 4] = [
+    (1, 0, 'D' as u8),
+    (-1, 0, 'U' as u8),
+    (0, 1, 'R' as u8),
+    (0, -1, 'L' as u8),
+];
 
 #[derive(Clone)]
 struct State {
@@ -62,10 +67,10 @@ fn solve(level: &[&str]) -> Option<String> {
     // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
     state.boxes.sort_unstable();
 
-    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(1_048_576);
+    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(65536);
     visited_boxes.insert(state.boxes.clone());
 
-    let mut queue: VecDeque<State> = VecDeque::with_capacity(32768);
+    let mut queue: VecDeque<State> = VecDeque::with_capacity(256);
     queue.insert(0, state);
 
     // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
@@ -74,7 +79,7 @@ fn solve(level: &[&str]) -> Option<String> {
 
     while let Some(state) = queue.pop_front() {
         if state.boxes.iter().all(|b| goals.contains(b)) {
-            return Some(state.path.iter().collect::<String>());
+            return Some(state.path.iter().map(|i| *i as char).collect::<String>());
         }
 
         stack.clear();
@@ -110,9 +115,7 @@ fn solve(level: &[&str]) -> Option<String> {
                 new_boxes.sort_unstable();
 
                 if !visited_boxes.insert(new_boxes.clone())
-                    || new_boxes
-                        .iter()
-                        .any(|&box_pos| is_dead_corner(box_pos, &goals, &grid))
+                    || new_boxes.iter().any(|&b| is_dead(b, &goals, &grid))
                 {
                     continue;
                 }
@@ -136,7 +139,7 @@ fn is_free(row: i8, col: i8, boxes: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SI
     grid[row as usize][col as usize] != '#' && !boxes.contains(&(row, col))
 }
 
-fn is_dead_corner(box_pos: Pos, goals: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
+fn is_dead(box_pos: Pos, goals: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
     if goals.contains(&box_pos) {
         return false;
     }
@@ -177,22 +180,22 @@ fn mark_reachable(
 }
 
 fn main() {
-    test_examples();
+    // test_examples();
     // TODO: This map takes 1.5 minutes to solve, optimize the solver further
     // stats:
-    //      num_branch: 25066728
-    //      max_queue: 2327406
-    //      visited_boxes.len(): 47684603
+    //      num_branch: 25_066_728
+    //      max_queue: 2_327_406
+    //      visited_boxes.len(): 47_684_603
     //      path.len(): 63
-    // let boring1 = [
-    //     "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
-    //     "#######",
-    // ];
+    let boring1 = [
+        "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
+        "#######",
+    ];
 
-    // // Box push only: "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"
-    // let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"; //"llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
-    // let actual = solve(&boring1).expect("No solution found");
-    // assert_eq!(actual, expected, "Unexpected solution");
+    // Box push only: "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"
+    let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"; //"llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
+    let actual = solve(&boring1).expect("No solution found");
+    assert_eq!(actual, expected, "Unexpected solution");
 }
 
 fn test_examples() {
