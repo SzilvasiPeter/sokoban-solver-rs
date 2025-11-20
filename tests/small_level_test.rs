@@ -5,7 +5,7 @@ fn test_microban() {
     let level = &[
         "####", "# .#", "#  ###", "#*@  #", "#  $ #", "#  ###", "####",
     ];
-    let expected = "ULURDLUU";
+    let expected = "dlUrrrdLullddrUluRuulDrddrruLdlUU";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
@@ -14,7 +14,7 @@ fn test_microban() {
 #[test]
 fn test_petitesse() {
     let level = &["#####", "#   #", "#.$.#", "# $ #", "#+$ #", "#####"];
-    let expected = "LRLU";
+    let expected = "uuurrdddLruuullddRluurrdLddrU";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
@@ -25,7 +25,7 @@ fn test_scoria() {
     let level = &[
         "  ####", "  #  #", "### .#", "#  * #", "# #@ #", "# $* #", "##   #", " #####",
     ];
-    let expected = "UURDRUUULDR";
+    let expected = "UdrddlUruulllddRdrruuuuulDrddddlluRdrUUULDrddlluluuR";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
@@ -37,7 +37,8 @@ fn test_autogen() {
         "########", "###  . #", "## * # #", "## .$  #", "##  #$##", "### @ ##", "########",
         "########",
     ];
-    let expected = "RLULULURRDUL";
+    let expected =
+        "luuluRurrrddlLrruullldlddrdrrUdlluluururrrddLddlluUddrruuLUdrddlluluuRuRDllddrUddrruuL";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
@@ -48,7 +49,7 @@ fn test_squared() {
     let level = &[
         "#######", "# . * #", "#.*$ .#", "# $ $ #", "#*$ .*#", "#@* * #", "#######",
     ];
-    let expected = "UURURRDLLU";
+    let expected = "UURURRDLdLU";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
@@ -60,7 +61,7 @@ fn test_boring2() {
         "#######", "#  .+.#", "#.*.####", "# $ $..#", "# $#$$ #", "#*$ $  #", "#      #",
         "########",
     ];
-    let expected = "RRDURUUURRDRDRURUULURRURUULLLURUUURURDLLLDLUUULUL";
+    let expected = "lddRRDrddlUdlluRdlllUUURlddRluurDuRuullDRdrUluRddldlddrUUddrruLdlluurUruuRllldRdrUluRddldlddrUUddrrrruLLLdlluurUruulldRddlddrUUUrRllUluRddrrDulldddrrruLLrrruLddlllluururrDrdLdllluuUdddrUUddrruLdlluurUrrddlL";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);

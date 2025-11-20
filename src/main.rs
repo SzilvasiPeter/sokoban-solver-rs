@@ -1,12 +1,12 @@
 use sokoban_solver::solve;
 
 fn main() {
-    // Takes around 20 seconds to solve
+    // Takes around 25 seconds to solve
     let boring1 = &[
         "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
         "#######",
     ];
-    let expected = "UURRUDUUUURLDLLDRUDURUDRRDUDDLDLULULRRRULDLLRUDURDRRULDLLUDULDLDD";
+    let expected = "UURRUrDlllddllUUUdddrruuURuuLDrddrruLruuLDlluRdrrddlllUdrrruullDurrddlUlldRlddlluuuUddddrruuuruulDrddlddlluuuuRRDullddddrrrUdllluuuurrdDDrdLuuurDurrdLulldddrrUdlluuurrruuLrddllldddrruULrddlluRuululldddRRUrrruLruulDLLuRdrrddlllUdrrruullDurrddlUlldRuuulDrddldlluuuRRlldddrruULulDrrrrruuLrdddLulldddrrUdlluuullDurrdddrruULulDrrruLruulDD";
 
     let actual = solve(boring1).expect("No solution was found!");
     assert_eq!(actual, expected);

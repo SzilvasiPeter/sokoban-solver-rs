@@ -3,13 +3,14 @@ use smallvec::SmallVec;
 
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-// use std::collections::VecDeque;
+use std::collections::VecDeque;
 
 // Each position uses i8 (avoiding casting hell), hence the map cannot exceed 127×127 size.
 type Pos = (i8, i8);
 type BoxOrGoal = SmallVec<[Pos; 15]>;
 type Grid = [[char; MAX_SIZE]; MAX_SIZE];
 type BoolGrid = [[bool; MAX_SIZE]; MAX_SIZE];
+type PathGrid = [[u8; MAX_SIZE]; MAX_SIZE];
 
 const MAX_SIZE: usize = 127;
 const DIRECTIONS: [(i8, i8, u8); 4] = [(1, 0, b'D'), (-1, 0, b'U'), (0, 1, b'R'), (0, -1, b'L')];
@@ -18,9 +19,9 @@ const DIRECTIONS: [(i8, i8, u8); 4] = [(1, 0, b'D'), (-1, 0, b'U'), (0, 1, b'R')
 struct State {
     boxes: BoxOrGoal,
     player: Pos,
-    pushes: SmallVec<[u8; 128]>,
-    cost: usize,     // Number of pushes made so far
-    priority: usize, // cost + heuristic
+    pushes: SmallVec<[u8; 128]>, // Now stores: PlayerPath + PushDir
+    cost: usize,                 // Number of pushes made so far
+    priority: usize,             // cost + heuristic
 }
 
 // We need Ord for BinaryHeap to work as a Priority Queue
@@ -60,7 +61,6 @@ pub fn solve(level: &[&str]) -> Option<String> {
     }
 
     let mut grid: Grid = [[' '; MAX_SIZE]; MAX_SIZE];
-    // let mut state = State::default();
     let mut initial_player = (0, 0);
     let mut initial_boxes = BoxOrGoal::new();
 
@@ -73,8 +73,8 @@ pub fn solve(level: &[&str]) -> Option<String> {
 
             let pos = (r as i8, c as i8);
             match char {
-                '@' | '+' => initial_player = pos, // state.player = (irow, icol),
-                '$' | '*' => initial_boxes.push(pos), // state.boxes.push((irow, icol)),
+                '@' | '+' => initial_player = pos,
+                '$' | '*' => initial_boxes.push(pos),
                 _ => {}
             }
             if matches!(char, '.' | '*' | '+') {
@@ -85,7 +85,6 @@ pub fn solve(level: &[&str]) -> Option<String> {
 
     // Keep boxes in a fixed order so the same setup isn't counted twice
     // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
-    // state.boxes.sort_unstable();
     initial_boxes.sort_unstable();
 
     let mut dead = [[true; MAX_SIZE]; MAX_SIZE];
@@ -93,28 +92,23 @@ pub fn solve(level: &[&str]) -> Option<String> {
 
     // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
     let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
-    let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
-    let mut came_from: Vec<u8> = Vec::new();
-
-    // let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(65536);
-    // visited_boxes.insert(state.boxes.clone());
-
-    // let mut queue: VecDeque<State> = VecDeque::with_capacity(256);
-    // queue.insert(0, state);
+    let mut came_from: PathGrid = [[0; MAX_SIZE]; MAX_SIZE];
+    let mut queue_buf: VecDeque<Pos> = VecDeque::new();
 
     // SETUP A* SEARCH
     // Buffer 2: Temporary buffer for calculating normalized player in FUTURE states
     let mut visited: AHashSet<(BoxOrGoal, Pos)> = AHashSet::with_capacity(65536);
     let mut queue: BinaryHeap<State> = BinaryHeap::new();
-    let mut normalization_buffer = [[false; MAX_SIZE]; MAX_SIZE];
+    let mut norm_buffer = [[false; MAX_SIZE]; MAX_SIZE];
+    let mut norm_stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
     // Normalize initial state
     let norm_player = get_normalized_player(
         initial_player,
         &initial_boxes,
         &grid,
-        &mut normalization_buffer,
-        &mut stack,
+        &mut norm_buffer,
+        &mut norm_stack,
     );
     visited.insert((initial_boxes.clone(), norm_player));
 
@@ -136,27 +130,31 @@ pub fn solve(level: &[&str]) -> Option<String> {
             return Some(state.pushes.iter().map(|i| *i as char).collect::<String>());
         }
 
-        stack.clear();
-        came_from.clear();
+        queue_buf.clear();
         for row in &mut reachable {
             row.fill(false);
         }
+        for row in &mut came_from {
+            row.fill(0);
+        }
 
-        mark_reachable(
+        // BFS to find all reachable squares and the shortest path (for moves) to them.
+        mark_reachable_with_path(
             state.player,
             &state.boxes,
             &grid,
             &mut reachable,
-            &mut stack,
+            &mut came_from,
+            &mut queue_buf,
         );
 
         for (i, &box_position) in state.boxes.iter().enumerate() {
             let (box_row, box_col) = box_position;
             for &(dr, dc, push_ch) in &DIRECTIONS {
                 let (new_box_row, new_box_col) = (box_row + dr, box_col + dc);
-                let (new_player_row, new_player_col) = (box_row - dr, box_col - dc);
+                let new_player_pos = (box_row - dr, box_col - dc);
 
-                if !reachable[new_player_row as usize][new_player_col as usize]
+                if !reachable[new_player_pos.0 as usize][new_player_pos.1 as usize]
                     || dead[new_box_row as usize][new_box_col as usize]
                     || !is_free(new_box_row, new_box_col, &state.boxes, &grid)
                 {
@@ -169,26 +167,28 @@ pub fn solve(level: &[&str]) -> Option<String> {
                 new_boxes.sort_unstable();
 
                 if is_locked(&new_boxes, &goals, &grid)
-                    // || !visited.insert(new_boxes.clone())
                     || is_square_deadlock(new_box_row, new_box_col, &new_boxes, &goals, &grid)
                 {
                     continue;
                 }
 
+                norm_stack.clear();
                 let norm_player = get_normalized_player(
                     box_position,
                     &new_boxes,
                     &grid,
-                    &mut normalization_buffer,
-                    &mut stack,
+                    &mut norm_buffer,
+                    &mut norm_stack,
                 );
 
                 if !visited.insert((new_boxes.clone(), norm_player)) {
                     continue;
                 }
 
+                let player_path = get_path(new_player_pos, state.player, &came_from, &grid);
                 let mut new_pushes = state.pushes.clone();
-                new_pushes.push(push_ch);
+                new_pushes.extend(player_path); // Append player movement
+                new_pushes.push(push_ch); // Append the actual box push
 
                 let new_cost = state.cost + 1;
                 let h = heuristic(&new_boxes, &goals);
@@ -224,8 +224,6 @@ fn heuristic(boxes: &BoxOrGoal, goals: &BoxOrGoal) -> usize {
 }
 
 // 2. Player Normalization
-// Returns the "canonical" position for the player (e.g., smallest coordinate reachable)
-// This ensures that if the player moves around in empty space without pushing, the state is identical.
 fn get_normalized_player(
     pos: Pos,
     boxes: &BoxOrGoal,
@@ -239,6 +237,7 @@ fn get_normalized_player(
     }
     stack.clear();
 
+    // Use mark_reachable (the simpler version) for normalization
     mark_reachable(pos, boxes, grid, normalization_buffer, stack);
 
     // Find top-left-most reachable square
@@ -313,7 +312,6 @@ fn is_locked(boxes: &BoxOrGoal, goals: &BoxOrGoal, grid: &Grid) -> bool {
     })
 }
 
-// num_branch: 1_183_902
 fn is_square_deadlock(
     box_row: i8,
     box_col: i8,
@@ -355,6 +353,7 @@ fn is_square_deadlock(
     false
 }
 
+// Simple reachable check for normalization (no path recording needed)
 fn mark_reachable(
     start: Pos,
     boxes: &BoxOrGoal,
@@ -377,4 +376,79 @@ fn mark_reachable(
             }
         }
     }
+}
+
+// Modified reachable check to record the path from start
+fn mark_reachable_with_path(
+    start: Pos,
+    boxes: &BoxOrGoal,
+    grid: &Grid,
+    reachable: &mut BoolGrid,
+    came_from: &mut PathGrid, // Stores the direction from new_pos to old_pos
+    queue: &mut VecDeque<Pos>,
+) {
+    queue.push_back(start);
+    reachable[start.0 as usize][start.1 as usize] = true;
+
+    while let Some((row, col)) = queue.pop_front() {
+        for &(dr, dc, push_ch) in &DIRECTIONS {
+            let new_row = row + dr;
+            let new_col = col + dc;
+            let (ur, uc) = (new_row as usize, new_col as usize);
+
+            // Path character is the direction *from* new_pos *to* old_pos
+            let path_ch = match push_ch {
+                b'U' => b'u',
+                b'D' => b'd',
+                b'L' => b'l',
+                b'R' => b'r',
+                _ => continue,
+            };
+
+            if is_free(new_row, new_col, boxes, grid) && !reachable[ur][uc] {
+                reachable[ur][uc] = true;
+                came_from[ur][uc] = path_ch;
+                queue.push_back((new_row, new_col));
+            }
+        }
+    }
+}
+
+// Function to reconstruct the path
+fn get_path(end: Pos, start: Pos, came_from: &PathGrid, grid: &Grid) -> SmallVec<[u8; 128]> {
+    if start == end {
+        return SmallVec::new();
+    }
+
+    let mut path_rev = Vec::new();
+    let mut current = end;
+
+    // Follow the came_from links back to the start
+    let max_len = grid.len() * grid[0].len();
+    for _ in 0..max_len {
+        let (cr, cc) = current;
+        let dir_char = came_from[cr as usize][cc as usize];
+
+        if dir_char == 0 {
+            break; // Reached start or uninitialized square
+        }
+
+        path_rev.push(dir_char);
+
+        // Determine the previous position
+        current = match dir_char {
+            b'u' => (cr + 1, cc), // `current` came from Up, so the previous position is Dow
+            b'd' => (cr - 1, cc), // `current` came from Down, so the previous position is Up
+            b'l' => (cr, cc + 1), // `current` came from Left, so the previous position is Right
+            b'r' => (cr, cc - 1), // `current` came from Right, so the previous position is Left
+            _ => break,
+        };
+
+        if current == start {
+            break;
+        }
+    }
+
+    path_rev.reverse(); // Path is constructed backwards, so reverse it
+    path_rev.into_iter().collect() // Convert to SmallVec
 }
