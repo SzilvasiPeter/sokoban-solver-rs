@@ -1,9 +1,15 @@
-use ahash::{AHashMap as HashMap, AHashSet as HashSet};
+use ahash::{AHashMap, AHashSet};
 use smallvec::SmallVec;
 use std::collections::VecDeque;
 
-type Pos = (usize, usize);
-type Boxes = SmallVec<[Pos; 10]>;
+// Each position uses i8 (avoiding casting hell), hence the map cannot exceed 127×127 size.
+type Pos = (i8, i8);
+
+// Handling at most 16 boxes.
+type Boxes = SmallVec<[Pos; 16]>;
+
+const MAX_SIZE: usize = 127;
+const DIRECTIONS: [(i8, i8, char); 4] = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'), (0, -1, 'L')];
 
 #[derive(Clone)]
 struct State {
@@ -13,65 +19,64 @@ struct State {
 
 pub fn solve(level: &[&str]) -> Option<String> {
     let height = level.len();
-    let width = level.iter().map(|r| r.len()).max().unwrap_or(0);
+    let width = level.iter().map(|row| row.len()).max();
 
-    let grid: Vec<Vec<char>> = level
-        .iter()
-        .map(|row| {
-            let mut v: Vec<char> = row.chars().collect();
-            v.resize(width, ' ');
-            v
-        })
-        .collect();
+    let width = width.expect("Level has no rows or all rows are empty");
+    if height > MAX_SIZE || width > MAX_SIZE {
+        panic!("Level too big: max size is {}x{}", MAX_SIZE, MAX_SIZE);
+    }
 
-    let mut box_positions = Boxes::new();
-    let mut goals = HashSet::default();
-    let mut player_pos = (0, 0);
-
-    // Parse map
+    let mut grid: [[char; MAX_SIZE]; MAX_SIZE] = [[' '; MAX_SIZE]; MAX_SIZE];
     for r in 0..height {
-        for c in 0..width {
-            let ch = grid[r][c];
-            match ch {
-                '@' | '+' => player_pos = (r, c),
-                '$' | '*' => box_positions.push((r, c)),
+        for c in 0..level[r].len() {
+            grid[r][c] = level[r].as_bytes()[c] as char;
+        }
+    }
+
+    let mut player = (0, 0);
+    let mut boxes = Boxes::new();
+    let mut goals = AHashSet::default();
+
+    for row in 0..height {
+        for col in 0..width {
+            let char = grid[row][col];
+
+            let row = row as i8;
+            let col = col as i8;
+            match char {
+                '@' | '+' => player = (row, col),
+                '$' | '*' => boxes.push((row, col)),
                 _ => {}
             }
-            if matches!(ch, '.' | '*' | '+') {
-                goals.insert((r, c));
+            if matches!(char, '.' | '*' | '+') {
+                goals.insert((row, col));
             }
         }
     }
 
-    box_positions.sort_unstable();
+    // Keep boxes in a fixed order so the same setup isn't counted twice
+    // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
+    boxes.sort_unstable();
+    let mut visited_boxes: AHashSet<Boxes> = AHashSet::from([boxes.clone()]);
 
-    let mut visited_boxes: HashSet<Boxes> = HashSet::default();
+    let init_state = State { boxes, player };
+    let mut queue: VecDeque<(State, String)> = VecDeque::from([(init_state, String::new())]);
 
-    let init_state = State {
-        boxes: box_positions.clone(),
-        player: player_pos,
-    };
-    visited_boxes.insert(box_positions.clone());
-
-    let mut queue = VecDeque::new();
-    queue.push_back((init_state, String::new()));
-
-    let mut reachable = vec![vec![false; width]; height];
-    let mut came_from: HashMap<Pos, (Pos, char)> = HashMap::default();
-    let mut stack = Vec::new();
-
-    let directions = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'), (0, -1, 'L')];
+    // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
+    let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
+    let mut came_from: AHashMap<Pos, (Pos, char)> = AHashMap::default();
+    let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
     while let Some((state, path)) = queue.pop_front() {
         if state.boxes.iter().all(|b| goals.contains(b)) {
             return Some(path);
         }
 
+        stack.clear();
+        came_from.clear();
         for row in &mut reachable {
             row.fill(false);
         }
-        came_from.clear();
-        stack.clear();
 
         flood_fill(
             state.player,
@@ -82,55 +87,44 @@ pub fn solve(level: &[&str]) -> Option<String> {
             &mut stack,
         );
 
-        for (i, &b) in state.boxes.iter().enumerate() {
-            let (br, bc) = b;
+        for (i, &box_position) in state.boxes.iter().enumerate() {
+            let (box_row, box_col) = box_position;
+            for &(dr, dc, push_ch) in &DIRECTIONS {
+                let player_row = box_row - dr;
+                let player_col = box_col - dc;
+                let box_row = box_row + dr;
+                let box_col = box_col + dc;
 
-            for &(dr, dc, push_ch) in &directions {
-                // required player position
-                let pr = br as isize - dr;
-                let pc = bc as isize - dc;
-                if pr < 0 || pc < 0 {
-                    continue;
-                }
-                let player_needed = (pr as usize, pc as usize);
-                if !reachable[player_needed.0][player_needed.1] {
-                    continue;
-                }
-
-                // new box position
-                let nr = br as isize + dr;
-                let nc = bc as isize + dc;
-                if !is_free(nr, nc, &state.boxes, &grid) {
-                    continue;
-                }
-                let new_box_pos = (nr as usize, nc as usize);
-
-                let mut new_boxes = state.boxes.clone();
-                new_boxes[i] = new_box_pos;
-                new_boxes.sort_unstable();
-
-                if new_boxes
-                    .iter()
-                    .any(|&bx| is_dead_corner(bx, &goals, &grid))
+                if !reachable[player_row as usize][player_col as usize]
+                    || !is_free(box_row, box_col, &state.boxes, &grid)
                 {
                     continue;
                 }
 
-                // Check visited *box configuration* only
-                if !visited_boxes.insert(new_boxes.clone()) {
+                let mut new_boxes = state.boxes.clone();
+                new_boxes[i] = (box_row, box_col);
+                new_boxes.sort_unstable();
+
+                if new_boxes
+                    .iter()
+                    .any(|&box_pos| is_dead_corner(box_pos, &goals, &grid))
+                    || !visited_boxes.insert(new_boxes.clone())
+                {
                     continue;
                 }
 
-                let moves = reconstruct_path(&came_from, player_needed);
-
-                let mut new_path = path.clone();
-                new_path.push_str(&moves);
-                new_path.push(push_ch);
+                // TODO: DO NOT reconstruct here, only append box pushes, and reconstruct later
+                let new_path = format!(
+                    "{}{}{}",
+                    path,
+                    reconstruct_path(&came_from, (player_row, player_col)),
+                    push_ch
+                );
 
                 queue.push_back((
                     State {
                         boxes: new_boxes,
-                        player: b,
+                        player: box_position,
                     },
                     new_path,
                 ));
@@ -141,37 +135,60 @@ pub fn solve(level: &[&str]) -> Option<String> {
     None
 }
 
+fn is_free(row: i8, col: i8, boxes: &Boxes, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
+    grid[row as usize][col as usize] != '#' && !boxes.contains(&(row, col))
+}
+
+fn is_dead_corner(
+    box_pos: Pos,
+    goals: &AHashSet<Pos>,
+    grid: &[[char; MAX_SIZE]; MAX_SIZE],
+) -> bool {
+    if goals.contains(&box_pos) {
+        return false;
+    }
+
+    let (row, col) = box_pos;
+    let blocked = |r: i8, c: i8| grid[r as usize][c as usize] == '#';
+
+    let up = blocked(row - 1, col);
+    let down = blocked(row + 1, col);
+    let left = blocked(row, col - 1);
+    let right = blocked(row, col + 1);
+
+    (up || down) && (left || right)
+}
+
 fn flood_fill(
     start: Pos,
     boxes: &Boxes,
-    grid: &[Vec<char>],
-    reachable: &mut [Vec<bool>],
-    came_from: &mut HashMap<Pos, (Pos, char)>,
+    grid: &[[char; MAX_SIZE]; MAX_SIZE],
+    reachable: &mut [[bool; MAX_SIZE]; MAX_SIZE],
+    came_from: &mut AHashMap<Pos, (Pos, char)>,
     stack: &mut Vec<Pos>,
 ) {
-    reachable[start.0][start.1] = true;
-    came_from.insert(start, (start, '\0'));
-    stack.push(start);
-
     let dirs = [(1, 0, 'd'), (-1, 0, 'u'), (0, 1, 'r'), (0, -1, 'l')];
 
-    while let Some((r, c)) = stack.pop() {
+    stack.push(start);
+    reachable[start.0 as usize][start.1 as usize] = true;
+    came_from.insert(start, (start, '\0'));
+
+    while let Some((row, col)) = stack.pop() {
         for &(dr, dc, mv) in &dirs {
-            let nr = r as isize + dr;
-            let nc = c as isize + dc;
+            let new_row = row + dr;
+            let new_col = col + dc;
+            let (ur, uc) = (new_row as usize, new_col as usize);
 
-            let (ur, uc) = (nr as usize, nc as usize);
-
-            if is_free(nr, nc, boxes, grid) && !reachable[ur][uc] {
+            if is_free(new_row, new_col, boxes, grid) && !reachable[ur][uc] {
                 reachable[ur][uc] = true;
-                came_from.insert((ur, uc), ((r, c), mv));
-                stack.push((ur, uc));
+                came_from.insert((new_row, new_col), ((row, col), mv));
+                stack.push((new_row, new_col));
             }
         }
     }
 }
 
-fn reconstruct_path(map: &HashMap<Pos, (Pos, char)>, end: Pos) -> String {
+fn reconstruct_path(map: &AHashMap<Pos, (Pos, char)>, end: Pos) -> String {
     let mut out = Vec::new();
     let mut cur = end;
 
@@ -187,54 +204,22 @@ fn reconstruct_path(map: &HashMap<Pos, (Pos, char)>, end: Pos) -> String {
     out.into_iter().collect()
 }
 
-#[inline]
-fn is_free(row: isize, col: isize, boxes: &Boxes, grid: &[Vec<char>]) -> bool {
-    if row < 0 || col < 0 {
-        return false;
-    }
-    let (r, c) = (row as usize, col as usize);
-    r < grid.len() && c < grid[0].len() && grid[r][c] != '#' && !boxes.contains(&(r, c))
-}
-
-fn is_dead_corner(b: Pos, goals: &HashSet<Pos>, grid: &[Vec<char>]) -> bool {
-    if goals.contains(&b) {
-        return false;
-    }
-
-    let (r, c) = b;
-    let h = grid.len();
-    let w = grid[0].len();
-
-    let wall = |rr: isize, cc: isize| {
-        if rr < 0 || cc < 0 {
-            return false;
-        }
-        let rr = rr as usize;
-        let cc = cc as usize;
-        rr < h && cc < w && grid[rr][cc] == '#'
-    };
-
-    let up = wall(r as isize - 1, c as isize);
-    let down = wall(r as isize + 1, c as isize);
-    let left = wall(r as isize, c as isize - 1);
-    let right = wall(r as isize, c as isize + 1);
-
-    (up || down) && (left || right)
-}
-
 fn main() {
     test_examples();
-    // let level = [
+    // TODO: This map takes several minutes to solve, optimize the solver further
+    // let boring1 = [
     //     "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
     //     "#######",
     // ];
-    // let solution = solve(&level);
-    // println!("{:?}", solution);
+
+    // // Box push only: "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"
+    // let expected = "llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
+    // let actual = solve(&boring1).expect("No solution found");
+    // assert_eq!(actual, expected, "Unexpected solution");
 }
 
 fn test_examples() {
-    use std::collections::HashMap;
-    let mut levels: HashMap<&str, (&[&str], &str)> = HashMap::new();
+    let mut levels: AHashMap<&str, (&[&str], &str)> = AHashMap::new();
 
     levels.insert(
         "microban",
@@ -242,6 +227,7 @@ fn test_examples() {
             &[
                 "####", "# .#", "#  ###", "#*@  #", "#  $ #", "#  ###", "####",
             ],
+            // "ULURDLUU"
             "dlUrrrdLullddrUluRuulDrddrruLdlUU",
         ),
     );
@@ -250,6 +236,7 @@ fn test_examples() {
         "petitesse",
         (
             &["#####", "#   #", "#.$.#", "# $ #", "#+$ #", "#####"],
+            // "LRLU"
             "uuurrdddLruuullddRluurrdLddrU",
         ),
     );
@@ -260,6 +247,7 @@ fn test_examples() {
             &[
                 "  ####", "  #  #", "### .#", "#  * #", "# #@ #", "# $* #", "##   #", " #####",
             ],
+            // "UURDLRUUUDR"
             "UrdddlUruulllddRluurrruulDrdLrdddlluRdrUUUlDrddlluluuR",
         ),
     );
@@ -268,15 +256,10 @@ fn test_examples() {
         "autogen",
         (
             &[
-                "########",
-                "###  . #",
-                "## * # #",
-                "## .$  #",
-                "##  #$##",
-                "### @ ##",
-                "########",
+                "########", "###  . #", "## * # #", "## .$  #", "##  #$##", "### @ ##", "########",
                 "########",
             ],
+            // "RLULULURRDUL"
             "luluuRurrrddlLrruullldlddrdrrUdlluluururrrddLruullldlddrUddrruuLUdrddlluluuRuRDllddrUddrruuL",
         ),
     );
@@ -287,6 +270,7 @@ fn test_examples() {
             &[
                 "#######", "# . * #", "#.*$ .#", "# $ $ #", "#*$ .*#", "#@* * #", "#######",
             ],
+            // "UURURRDLLU"
             "UURURRDLdLU",
         ),
     );
@@ -298,6 +282,7 @@ fn test_examples() {
                 "#######", "#  .+.#", "#.*.####", "# $ $..#", "# $#$$ #", "#*$ $  #", "#      #",
                 "########",
             ],
+            // "RRDUUURRRURRDURRRDUUUUDURRLUUURLLLDLUUUURULLDUUULLL"
             "lddRRDrddlllllUUURRRllldddrrrrUdlluRldlluRluurruullDurrddlUluRRRllddDlUdddrUUUruullDurrddlUluRRldddlddrrruLdlUUUruulldRddlddrrrrruLLLdlluururrDulldlddrrrrruuLrddllllUUUUluRdddlUrddrdrruLLdlluururrDrrddllllUUUlddrrdrruLLL",
         ),
     );
