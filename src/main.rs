@@ -74,7 +74,10 @@ fn solve(level: &[&str]) -> Option<String> {
     let mut queue: VecDeque<State> = VecDeque::with_capacity(256);
     queue.insert(0, state);
 
-    // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
+    let mut dead = [[false; MAX_SIZE]; MAX_SIZE];
+    dead_squares(&grid, &goals, &mut dead);
+
+    // Using in-place mutation avoids cloning and heap allocation.
     let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
     let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
@@ -108,6 +111,7 @@ fn solve(level: &[&str]) -> Option<String> {
                 let box_col = box_col + dc;
 
                 if !reachable[player_row as usize][player_col as usize]
+                    || dead[box_row as usize][box_col as usize]
                     || !is_free(box_row, box_col, &state.boxes, &grid)
                 {
                     continue;
@@ -178,6 +182,49 @@ fn is_locked(boxes: &BoxOrGoal, goals: &BoxOrGoal, grid: &Grid) -> bool {
     })
 }
 
+fn dead_squares(grid: &Grid, goals: &BoxOrGoal, dead: &mut [[bool; MAX_SIZE]; MAX_SIZE]) {
+    let height = grid.len();
+    let mut alive = AHashSet::new();
+    let mut queue = Vec::new();
+
+    for (x, y) in goals {
+        alive.insert((*x, *y));
+        queue.push((*x, *y));
+    }
+
+    let dirs: [(i8, i8); 4] = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+
+    while let Some((r, c)) = queue.pop() {
+        for (dr, dc) in dirs {
+            let (prev_r, prev_c) = (r - dr, c - dc);
+            let (player_r, player_c) = (r - 2 * dr, c - 2 * dc);
+
+            let outbound = |r: i8, c: i8, h: usize, m: &Grid| {
+                r < 0 || r as usize >= h || c < 0 || c as usize >= m[r as usize].len()
+            };
+
+            if outbound(prev_r, prev_c, height, &grid)
+                || outbound(player_r, player_c, height, &grid)
+            {
+                continue;
+            }
+
+            let (pu_r, pu_c) = (prev_r as usize, prev_c as usize);
+            let (plu_r, plu_c) = (player_r as usize, player_c as usize);
+
+            if grid[pu_r][pu_c] != '#' && grid[plu_r][plu_c] != '#' {
+                if alive.insert((prev_r, prev_c)) {
+                    queue.push((prev_r, prev_c));
+                }
+            }
+        }
+    }
+
+    for (y, x) in alive.iter() {
+        dead[*y as usize][*x as usize] = false;
+    }
+}
+
 fn mark_reachable(
     start: Pos,
     boxes: &BoxOrGoal,
@@ -203,22 +250,22 @@ fn mark_reachable(
 }
 
 fn main() {
-    test_examples();
+    // test_examples();
     // TODO: This map takes 1.5 minutes to solve, optimize the solver further
     // stats:
     //      num_branch: 25_066_728
     //      max_queue: 2_327_406
     //      visited_boxes.len(): 47_684_603
     //      path.len(): 63
-    // let boring1 = [
-    //     "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
-    //     "#######",
-    // ];
+    let boring1 = [
+        "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
+        "#######",
+    ];
 
-    // // "llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD"
-    // let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD";
-    // let actual = solve(&boring1).expect("No solution found");
-    // assert_eq!(actual, expected, "Unexpected solution");
+    // "llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD"
+    let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD";
+    let actual = solve(&boring1).expect("No solution found");
+    assert_eq!(actual, expected, "Unexpected solution");
 }
 
 fn test_examples() {
