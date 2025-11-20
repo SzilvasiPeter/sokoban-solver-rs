@@ -2,6 +2,10 @@
 lint:
 	cargo clippy -- -W clippy::perf
 
+.PHONY: test
+test:
+	cargo test --release
+
 .PHONY: build
 build:
 	cargo build --release
