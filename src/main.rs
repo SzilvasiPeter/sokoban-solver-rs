@@ -1,16 +1,40 @@
 use sokoban_solver::solve;
 
 fn main() {
-    // Takes around 25 seconds to solve
-    let boring1 = &[
-        "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
-        "#######",
+    // num_node: 33_877_811
+    // rUdldRddrruuLrddlluUrrdLulUdrddlUUlLddlluuRRddlUruRldlluRRuruLuulldRurDDDuulldRurDrRRUruulldDrdLurrrdLuuLdldLrurrdLuuulDrddLruulD
+    //
+    // real    10m5.144s
+    // user    10m1.015s
+    // sys     0m0.457s
+    let microban92 = &[
+        " #########",
+        "##   #   ##",
+        "#    #    #",
+        "#  $ # $  #",
+        "#   *.*   #",
+        "####.@.####",
+        "#   *.*   #",
+        "#  $ # $  #",
+        "#    #    #",
+        "##   #   ##",
+        " #########",
     ];
-    let expected = "UURRUrDlllddllUUUdddrruuURuuLDrddrruLruuLDlluRdrrddlllUdrrruullDurrddlUlldRlddlluuuUddddrruuuruulDrddlddlluuuuRRDullddddrrrUdllluuuurrdDDrdLuuurDurrdLulldddrrUdlluuurrruuLrddllldddrruULrddlluRuululldddRRUrrruLruulDLLuRdrrddlllUdrrruullDurrddlUlldRuuulDrddldlluuuRRlldddrruULulDrrrrruuLrdddLulldddrrUdlluuullDurrdddrruULulDrrruLruulDD";
-
-    let actual = solve(boring1).expect("No solution was found!");
-    assert_eq!(actual, expected);
+    let solution = solve(microban92).expect("No solution!");
+    println!("{}", solution);
 }
+
+// // Takes around 25 seconds to solve
+// fn main() {
+//     let boring1 = &[
+//         "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
+//         "#######",
+//     ];
+//     let expected = "UURRUrDlllddllUUUdddrruuURuuLDrddrruLruuLDlluRdrrddlllUdrrruullDurrddlUlldRlddlluuuUddddrruuuruulDrddlddlluuuuRRDullddddrrrUdllluuuurrdDDrdLuuurDurrdLulldddrrUdlluuurrruuLrddllldddrruULrddlluRuululldddRRUrrruLruulDLLuRdrrddlllUdrrruullDurrddlUlldRuuulDrddldlluuuRRlldddrruULulDrrrrruuLrdddLulldddrrUdlluuullDurrdddrruULulDrrruLruulDD";
+
+//     let actual = solve(boring1).expect("No solution was found!");
+//     assert_eq!(actual, expected);
+// }
 
 // --- Run solver for a map ---
 // ----------------------------

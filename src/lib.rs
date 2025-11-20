@@ -122,11 +122,11 @@ pub fn solve(level: &[&str]) -> Option<String> {
         priority: initial_h,
     });
 
-    let mut num_branch = 0;
+    let mut num_node = 0;
     while let Some(state) = queue.pop() {
-        num_branch += 1;
+        num_node += 1;
         if state.boxes.iter().all(|b| goals.contains(b)) {
-            println!("num_branch: {}", num_branch);
+            println!("num_branch: {}", num_node);
             return Some(state.pushes.iter().map(|i| *i as char).collect::<String>());
         }
 
