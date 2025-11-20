@@ -4,8 +4,6 @@ use std::collections::VecDeque;
 
 // Each position uses i8 (avoiding casting hell), hence the map cannot exceed 127×127 size.
 type Pos = (i8, i8);
-
-// Handling at most 16 boxes.
 type BoxOrGoal = SmallVec<[Pos; 16]>;
 
 const MAX_SIZE: usize = 127;
@@ -57,23 +55,25 @@ pub fn solve(level: &[&str]) -> Option<String> {
     // Keep boxes in a fixed order so the same setup isn't counted twice
     // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
     boxes.sort_unstable();
-    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::from([boxes.clone()]);
+    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(1_048_576);
+    visited_boxes.insert(boxes.clone());
 
     let init_state = State { boxes, player };
     let mut queue: VecDeque<(State, String)> = VecDeque::from([(init_state, String::new())]);
 
     // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
     let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
-    let mut came_from: AHashMap<Pos, (Pos, char)> = AHashMap::default();
     let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
+    let mut num_branch: usize = 0;
     while let Some((state, path)) = queue.pop_front() {
+        num_branch += 1;
         if state.boxes.iter().all(|b| goals.contains(b)) {
+            println!("num_branch: {}", num_branch);
             return Some(path);
         }
 
         stack.clear();
-        came_from.clear();
         for row in &mut reachable {
             row.fill(false);
         }
@@ -83,7 +83,6 @@ pub fn solve(level: &[&str]) -> Option<String> {
             &state.boxes,
             &grid,
             &mut reachable,
-            &mut came_from,
             &mut stack,
         );
 
@@ -105,21 +104,19 @@ pub fn solve(level: &[&str]) -> Option<String> {
                 new_boxes[i] = (box_row, box_col);
                 new_boxes.sort_unstable();
 
+                if !visited_boxes.insert(new_boxes.clone()) {
+                    continue;
+                }
+
                 if new_boxes
                     .iter()
                     .any(|&box_pos| is_dead_corner(box_pos, &goals, &grid))
-                    || !visited_boxes.insert(new_boxes.clone())
                 {
                     continue;
                 }
 
                 // TODO: DO NOT reconstruct here, only append box pushes, and reconstruct later
-                let new_path = format!(
-                    "{}{}{}",
-                    path,
-                    reconstruct_path(&came_from, (player_row, player_col)),
-                    push_ch
-                );
+                let new_path = format!("{}{}", path, push_ch);
 
                 queue.push_back((
                     State {
@@ -160,44 +157,23 @@ fn mark_reachable(
     boxes: &BoxOrGoal,
     grid: &[[char; MAX_SIZE]; MAX_SIZE],
     reachable: &mut [[bool; MAX_SIZE]; MAX_SIZE],
-    came_from: &mut AHashMap<Pos, (Pos, char)>,
     stack: &mut Vec<Pos>,
 ) {
-    let dirs = [(1, 0, 'd'), (-1, 0, 'u'), (0, 1, 'r'), (0, -1, 'l')];
-
     stack.push(start);
     reachable[start.0 as usize][start.1 as usize] = true;
-    came_from.insert(start, (start, '\0'));
 
     while let Some((row, col)) = stack.pop() {
-        for &(dr, dc, mv) in &dirs {
+        for &(dr, dc, _) in &DIRECTIONS {
             let new_row = row + dr;
             let new_col = col + dc;
             let (ur, uc) = (new_row as usize, new_col as usize);
 
             if is_free(new_row, new_col, boxes, grid) && !reachable[ur][uc] {
                 reachable[ur][uc] = true;
-                came_from.insert((new_row, new_col), ((row, col), mv));
                 stack.push((new_row, new_col));
             }
         }
     }
-}
-
-fn reconstruct_path(map: &AHashMap<Pos, (Pos, char)>, end: Pos) -> String {
-    let mut out = Vec::new();
-    let mut cur = end;
-
-    while let Some(&(prev, mv)) = map.get(&cur) {
-        if mv == '\0' {
-            break;
-        }
-        out.push(mv);
-        cur = prev;
-    }
-
-    out.reverse();
-    out.into_iter().collect()
 }
 
 fn main() {
@@ -223,8 +199,8 @@ fn test_examples() {
             &[
                 "####", "# .#", "#  ###", "#*@  #", "#  $ #", "#  ###", "####",
             ],
-            // "ULURDLUU"
-            "dlUrrrdLullddrUluRuulDrddrruLdlUU",
+            // "dlUrrrdLullddrUluRuulDrddrruLdlUU",
+            "ULURDLUU",
         ),
     );
 
@@ -232,8 +208,8 @@ fn test_examples() {
         "petitesse",
         (
             &["#####", "#   #", "#.$.#", "# $ #", "#+$ #", "#####"],
-            // "LRLU"
-            "uuurrdddLruuullddRluurrdLddrU",
+            // "uuurrdddLruuullddRluurrdLddrU",
+            "LRLU",
         ),
     );
 
@@ -243,8 +219,8 @@ fn test_examples() {
             &[
                 "  ####", "  #  #", "### .#", "#  * #", "# #@ #", "# $* #", "##   #", " #####",
             ],
-            // "UURDLRUUUDR"
-            "UrdddlUruulllddRluurrruulDrdLrdddlluRdrUUUlDrddlluluuR",
+            // "UrdddlUruulllddRluurrruulDrdLrdddlluRdrUUUlDrddlluluuR",
+            "UURDLRUUUDR",
         ),
     );
 
@@ -255,8 +231,8 @@ fn test_examples() {
                 "########", "###  . #", "## * # #", "## .$  #", "##  #$##", "### @ ##", "########",
                 "########",
             ],
-            // "RLULULURRDUL"
-            "luluuRurrrddlLrruullldlddrdrrUdlluluururrrddLruullldlddrUddrruuLUdrddlluluuRuRDllddrUddrruuL",
+            // "luluuRurrrddlLrruullldlddrdrrUdlluluururrrddLruullldlddrUddrruuLUdrddlluluuRuRDllddrUddrruuL",
+            "RLULULURRDUL",
         ),
     );
 
@@ -266,8 +242,8 @@ fn test_examples() {
             &[
                 "#######", "# . * #", "#.*$ .#", "# $ $ #", "#*$ .*#", "#@* * #", "#######",
             ],
-            // "UURURRDLLU"
-            "UURURRDLdLU",
+            // "UURURRDLdLU",
+            "UURURRDLLU",
         ),
     );
 
@@ -278,8 +254,8 @@ fn test_examples() {
                 "#######", "#  .+.#", "#.*.####", "# $ $..#", "# $#$$ #", "#*$ $  #", "#      #",
                 "########",
             ],
-            // "RRDUUURRRURRDURRRDUUUUDURRLUUURLLLDLUUUURULLDUUULLL"
-            "lddRRDrddlllllUUURRRllldddrrrrUdlluRldlluRluurruullDurrddlUluRRRllddDlUdddrUUUruullDurrddlUluRRldddlddrrruLdlUUUruulldRddlddrrrrruLLLdlluururrDulldlddrrrrruuLrddllllUUUUluRdddlUrddrdrruLLdlluururrDrrddllllUUUlddrrdrruLLL",
+            // "lddRRDrddlllllUUURRRllldddrrrrUdlluRldlluRluurruullDurrddlUluRRRllddDlUdddrUUUruullDurrddlUluRRldddlddrrruLdlUUUruulldRddlddrrrrruLLLdlluururrDulldlddrrrrruuLrddllllUUUUluRdddlUrddrdrruLLdlluururrDrrddllllUUUlddrrdrruLLL",
+            "RRDUUURRRURRDURRRDUUUUDURRLUUURLLLDLUUUURULLDUUULLL",
         ),
     );
 
