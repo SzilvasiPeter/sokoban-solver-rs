@@ -6,14 +6,14 @@ use std::collections::VecDeque;
 type Pos = (i8, i8);
 
 // Handling at most 16 boxes.
-type Boxes = SmallVec<[Pos; 16]>;
+type BoxOrGoal = SmallVec<[Pos; 16]>;
 
 const MAX_SIZE: usize = 127;
 const DIRECTIONS: [(i8, i8, char); 4] = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'), (0, -1, 'L')];
 
 #[derive(Clone)]
 struct State {
-    boxes: Boxes,
+    boxes: BoxOrGoal,
     player: Pos,
 }
 
@@ -34,8 +34,8 @@ pub fn solve(level: &[&str]) -> Option<String> {
     }
 
     let mut player = (0, 0);
-    let mut boxes = Boxes::new();
-    let mut goals = AHashSet::default();
+    let mut boxes = BoxOrGoal::new();
+    let mut goals = BoxOrGoal::new();
 
     for row in 0..height {
         for col in 0..width {
@@ -49,7 +49,7 @@ pub fn solve(level: &[&str]) -> Option<String> {
                 _ => {}
             }
             if matches!(char, '.' | '*' | '+') {
-                goals.insert((row, col));
+                goals.push((row, col));
             }
         }
     }
@@ -57,7 +57,7 @@ pub fn solve(level: &[&str]) -> Option<String> {
     // Keep boxes in a fixed order so the same setup isn't counted twice
     // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
     boxes.sort_unstable();
-    let mut visited_boxes: AHashSet<Boxes> = AHashSet::from([boxes.clone()]);
+    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::from([boxes.clone()]);
 
     let init_state = State { boxes, player };
     let mut queue: VecDeque<(State, String)> = VecDeque::from([(init_state, String::new())]);
@@ -78,7 +78,7 @@ pub fn solve(level: &[&str]) -> Option<String> {
             row.fill(false);
         }
 
-        flood_fill(
+        mark_reachable(
             state.player,
             &state.boxes,
             &grid,
@@ -135,15 +135,11 @@ pub fn solve(level: &[&str]) -> Option<String> {
     None
 }
 
-fn is_free(row: i8, col: i8, boxes: &Boxes, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
+fn is_free(row: i8, col: i8, boxes: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
     grid[row as usize][col as usize] != '#' && !boxes.contains(&(row, col))
 }
 
-fn is_dead_corner(
-    box_pos: Pos,
-    goals: &AHashSet<Pos>,
-    grid: &[[char; MAX_SIZE]; MAX_SIZE],
-) -> bool {
+fn is_dead_corner(box_pos: Pos, goals: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
     if goals.contains(&box_pos) {
         return false;
     }
@@ -159,9 +155,9 @@ fn is_dead_corner(
     (up || down) && (left || right)
 }
 
-fn flood_fill(
+fn mark_reachable(
     start: Pos,
-    boxes: &Boxes,
+    boxes: &BoxOrGoal,
     grid: &[[char; MAX_SIZE]; MAX_SIZE],
     reachable: &mut [[bool; MAX_SIZE]; MAX_SIZE],
     came_from: &mut AHashMap<Pos, (Pos, char)>,
