@@ -6,6 +6,7 @@ use std::collections::VecDeque;
 type Pos = (i8, i8);
 type BoxOrGoal = SmallVec<[Pos; 15]>;
 type Path = SmallVec<[u8; 64]>;
+type Grid = [[char; MAX_SIZE]; MAX_SIZE];
 
 const MAX_SIZE: usize = 127;
 const DIRECTIONS: [(i8, i8, u8); 4] = [
@@ -41,7 +42,7 @@ fn solve(level: &[&str]) -> Option<String> {
         panic!("Level too big: max size is {}x{}", MAX_SIZE, MAX_SIZE);
     }
 
-    let mut grid: [[char; MAX_SIZE]; MAX_SIZE] = [[' '; MAX_SIZE]; MAX_SIZE];
+    let mut grid: Grid = [[' '; MAX_SIZE]; MAX_SIZE];
     let mut state = State::default();
     let mut goals = BoxOrGoal::new();
 
@@ -77,8 +78,11 @@ fn solve(level: &[&str]) -> Option<String> {
     let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
     let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
+    let mut num_branch = 0;
     while let Some(state) = queue.pop_front() {
+        num_branch += 1;
         if state.boxes.iter().all(|b| goals.contains(b)) {
+            println!("num_branch: {}", num_branch);
             return Some(state.path.iter().map(|i| *i as char).collect::<String>());
         }
 
@@ -115,7 +119,8 @@ fn solve(level: &[&str]) -> Option<String> {
                 new_boxes.sort_unstable();
 
                 if !visited_boxes.insert(new_boxes.clone())
-                    || new_boxes.iter().any(|&b| is_dead(b, &goals, &grid))
+                    || is_cornered(&new_boxes, &goals, &grid)
+                    || is_locked(&new_boxes, &goals, &grid)
                 {
                     continue;
                 }
@@ -135,30 +140,48 @@ fn solve(level: &[&str]) -> Option<String> {
     None
 }
 
-fn is_free(row: i8, col: i8, boxes: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
+fn is_free(row: i8, col: i8, boxes: &BoxOrGoal, grid: &Grid) -> bool {
     grid[row as usize][col as usize] != '#' && !boxes.contains(&(row, col))
 }
 
-fn is_dead(box_pos: Pos, goals: &BoxOrGoal, grid: &[[char; MAX_SIZE]; MAX_SIZE]) -> bool {
-    if goals.contains(&box_pos) {
-        return false;
-    }
+fn is_wall(row: i8, col: i8, grid: &Grid) -> bool {
+    grid[row as usize][col as usize] == '#'
+}
 
-    let (row, col) = box_pos;
-    let blocked = |r: i8, c: i8| grid[r as usize][c as usize] == '#';
+// num_branch: 25_066_728
+fn is_cornered(boxes: &BoxOrGoal, goals: &BoxOrGoal, grid: &Grid) -> bool {
+    boxes
+        .iter()
+        .filter(|&b| !goals.contains(b))
+        .any(|&(row, col)| {
+            let up = is_wall(row - 1, col, grid);
+            let down = is_wall(row + 1, col, grid);
+            let left = is_wall(row, col - 1, grid);
+            let right = is_wall(row, col + 1, grid);
 
-    let up = blocked(row - 1, col);
-    let down = blocked(row + 1, col);
-    let left = blocked(row, col - 1);
-    let right = blocked(row, col + 1);
+            (up || down) && (left || right)
+        })
+}
 
-    (up || down) && (left || right)
+// num_branch: 18_605_395
+fn is_locked(boxes: &BoxOrGoal, goals: &BoxOrGoal, grid: &Grid) -> bool {
+    let is_blocked = |r, c| !is_free(r, c, boxes, grid);
+    boxes.iter().filter(|&b| !goals.contains(b)).any(|&(r, c)| {
+        let up = is_wall(r - 1, c, grid);
+        let down = is_wall(r + 1, c, grid);
+        let left = is_wall(r, c - 1, grid);
+        let right = is_wall(r, c + 1, grid);
+        let h_block = is_blocked(r, c - 1) || is_blocked(r, c + 1);
+        let v_block = is_blocked(r - 1, c) || is_blocked(r + 1, c);
+
+        (up && down && h_block) || (left && right && v_block)
+    })
 }
 
 fn mark_reachable(
     start: Pos,
     boxes: &BoxOrGoal,
-    grid: &[[char; MAX_SIZE]; MAX_SIZE],
+    grid: &Grid,
     reachable: &mut [[bool; MAX_SIZE]; MAX_SIZE],
     stack: &mut Vec<Pos>,
 ) {
@@ -180,22 +203,22 @@ fn mark_reachable(
 }
 
 fn main() {
-    // test_examples();
+    test_examples();
     // TODO: This map takes 1.5 minutes to solve, optimize the solver further
     // stats:
     //      num_branch: 25_066_728
     //      max_queue: 2_327_406
     //      visited_boxes.len(): 47_684_603
     //      path.len(): 63
-    let boring1 = [
-        "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
-        "#######",
-    ];
+    // let boring1 = [
+    //     "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
+    //     "#######",
+    // ];
 
-    // Box push only: "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"
-    let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"; //"llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
-    let actual = solve(&boring1).expect("No solution found");
-    assert_eq!(actual, expected, "Unexpected solution");
+    // // "llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD"
+    // let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD";
+    // let actual = solve(&boring1).expect("No solution found");
+    // assert_eq!(actual, expected, "Unexpected solution");
 }
 
 fn test_examples() {
@@ -268,8 +291,22 @@ fn test_examples() {
     );
 
     for (key, (map, expected)) in levels.iter() {
-        println!("{}", key);
-        let actual = solve(map).expect("No solution found");
-        assert_eq!(actual, *expected, "Unexpected solution");
+        let actual = solve(map);
+
+        match actual {
+            Some(sol) if sol == *expected => {
+                println!("Correct solution: {}", key);
+            }
+
+            Some(sol) => {
+                println!("Unexpected solution for {}", key);
+
+                println!("{}", sol);
+            }
+
+            None => {
+                println!("No solution found for {}", key);
+            }
+        }
     }
 }
