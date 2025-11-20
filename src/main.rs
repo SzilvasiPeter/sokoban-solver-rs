@@ -4,7 +4,8 @@ use std::collections::VecDeque;
 
 // Each position uses i8 (avoiding casting hell), hence the map cannot exceed 127×127 size.
 type Pos = (i8, i8);
-type BoxOrGoal = SmallVec<[Pos; 16]>;
+type BoxOrGoal = SmallVec<[Pos; 15]>;
+type Path = SmallVec<[char; 64]>;
 
 const MAX_SIZE: usize = 127;
 const DIRECTIONS: [(i8, i8, char); 4] = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'), (0, -1, 'L')];
@@ -13,9 +14,20 @@ const DIRECTIONS: [(i8, i8, char); 4] = [(1, 0, 'D'), (-1, 0, 'U'), (0, 1, 'R'),
 struct State {
     boxes: BoxOrGoal,
     player: Pos,
+    path: Path,
 }
 
-pub fn solve(level: &[&str]) -> Option<String> {
+impl Default for State {
+    fn default() -> Self {
+        Self {
+            boxes: BoxOrGoal::new(),
+            player: (0, 0),
+            path: Path::new(),
+        }
+    }
+}
+
+fn solve(level: &[&str]) -> Option<String> {
     let height = level.len();
     let width = level.iter().map(|row| row.len()).max();
 
@@ -25,8 +37,7 @@ pub fn solve(level: &[&str]) -> Option<String> {
     }
 
     let mut grid: [[char; MAX_SIZE]; MAX_SIZE] = [[' '; MAX_SIZE]; MAX_SIZE];
-    let mut player = (0, 0);
-    let mut boxes = BoxOrGoal::new();
+    let mut state = State::default();
     let mut goals = BoxOrGoal::new();
 
     for (r, row) in level.iter().enumerate().take(height) {
@@ -37,8 +48,8 @@ pub fn solve(level: &[&str]) -> Option<String> {
             let irow = r as i8;
             let icol = c as i8;
             match char {
-                '@' | '+' => player = (irow, icol),
-                '$' | '*' => boxes.push((irow, icol)),
+                '@' | '+' => state.player = (irow, icol),
+                '$' | '*' => state.boxes.push((irow, icol)),
                 _ => {}
             }
             if matches!(char, '.' | '*' | '+') {
@@ -49,23 +60,21 @@ pub fn solve(level: &[&str]) -> Option<String> {
 
     // Keep boxes in a fixed order so the same setup isn't counted twice
     // e.g. [(2,3),(4,5)] and [(4,5),(2,3)] are treated the same.
-    boxes.sort_unstable();
-    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(1_048_576);
-    visited_boxes.insert(boxes.clone());
+    state.boxes.sort_unstable();
 
-    let init_state = State { boxes, player };
-    let mut queue: VecDeque<(State, String)> = VecDeque::from([(init_state, String::new())]);
+    let mut visited_boxes: AHashSet<BoxOrGoal> = AHashSet::with_capacity(1_048_576);
+    visited_boxes.insert(state.boxes.clone());
+
+    let mut queue: VecDeque<State> = VecDeque::with_capacity(32768);
+    queue.insert(0, state);
 
     // Using in-place mutation avoids cloning and heap allocation, making the flood fill faster.
     let mut reachable = [[false; MAX_SIZE]; MAX_SIZE];
     let mut stack = Vec::with_capacity(MAX_SIZE * MAX_SIZE);
 
-    let mut num_branch: usize = 0;
-    while let Some((state, path)) = queue.pop_front() {
-        num_branch += 1;
+    while let Some(state) = queue.pop_front() {
         if state.boxes.iter().all(|b| goals.contains(b)) {
-            println!("num_branch: {}", num_branch);
-            return Some(path);
+            return Some(state.path.iter().collect::<String>());
         }
 
         stack.clear();
@@ -95,31 +104,27 @@ pub fn solve(level: &[&str]) -> Option<String> {
                     continue;
                 }
 
+                // Cloning `SmallVec` is very cheap.
                 let mut new_boxes = state.boxes.clone();
                 new_boxes[i] = (box_row, box_col);
                 new_boxes.sort_unstable();
 
-                if !visited_boxes.insert(new_boxes.clone()) {
-                    continue;
-                }
-
-                if new_boxes
-                    .iter()
-                    .any(|&box_pos| is_dead_corner(box_pos, &goals, &grid))
+                if !visited_boxes.insert(new_boxes.clone())
+                    || new_boxes
+                        .iter()
+                        .any(|&box_pos| is_dead_corner(box_pos, &goals, &grid))
                 {
                     continue;
                 }
 
-                // TODO: DO NOT reconstruct here, only append box pushes, and reconstruct later
-                let new_path = format!("{}{}", path, push_ch);
+                let mut new_path = state.path.clone();
+                new_path.push(push_ch);
 
-                queue.push_back((
-                    State {
-                        boxes: new_boxes,
-                        player: box_position,
-                    },
-                    new_path,
-                ));
+                queue.push_back(State {
+                    boxes: new_boxes,
+                    player: box_position,
+                    path: new_path,
+                });
             }
         }
     }
@@ -173,14 +178,19 @@ fn mark_reachable(
 
 fn main() {
     test_examples();
-    // TODO: This map takes several minutes to solve, optimize the solver further
+    // TODO: This map takes 1.5 minutes to solve, optimize the solver further
+    // stats:
+    //      num_branch: 25066728
+    //      max_queue: 2327406
+    //      visited_boxes.len(): 47684603
+    //      path.len(): 63
     // let boring1 = [
     //     "########", "#..$.$ #", "# $..  #", "# $ *$ #", "# # $. #", "#*$**$.#", "# .@  ##",
     //     "#######",
     // ];
 
     // // Box push only: "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"
-    // let expected = "llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
+    // let expected = "UUUUUUURRUDRLDLLDRUDURDRRDDUDLDLUULRRDRULLLUDURDLRRULDDLUULDLDD"; //"llUUUUddddrrUUUdRRUrDllluRuuLDrddrruuuLrddLruulDlluRdrrddlllUdrrruullDurrddlUlldRuuulDrddlddlluuuuRRDDuullddddrrrUdllluuuurrddDrdLuuurDurrdLulldddrrUULrddlluRuululldddRluuurrurDllldddrRUrrruuLLLrrrddlllUdrrruullDurrddlUlldRuuulDrdrruuLrddlldldlluuuRRlldddrruULulDDurrrrrdLulldddrrUULulDrrruLruulDD";
     // let actual = solve(&boring1).expect("No solution found");
     // assert_eq!(actual, expected, "Unexpected solution");
 }
@@ -255,18 +265,8 @@ fn test_examples() {
     );
 
     for (key, (map, expected)) in levels.iter() {
-        let actual = solve(map);
-        match actual {
-            Some(sol) if sol == *expected => {
-                println!("Correct solution: {}", key);
-            }
-            Some(sol) => {
-                println!("Unexpected solution for {}", key);
-                println!("{}", sol);
-            }
-            None => {
-                println!("No solution found for {}", key);
-            }
-        }
+        println!("{}", key);
+        let actual = solve(map).expect("No solution found");
+        assert_eq!(actual, *expected, "Unexpected solution");
     }
 }
