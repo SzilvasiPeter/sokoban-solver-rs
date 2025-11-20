@@ -25,29 +25,24 @@ pub fn solve(level: &[&str]) -> Option<String> {
     }
 
     let mut grid: [[char; MAX_SIZE]; MAX_SIZE] = [[' '; MAX_SIZE]; MAX_SIZE];
-    for r in 0..height {
-        for c in 0..level[r].len() {
-            grid[r][c] = level[r].as_bytes()[c] as char;
-        }
-    }
-
     let mut player = (0, 0);
     let mut boxes = BoxOrGoal::new();
     let mut goals = BoxOrGoal::new();
 
-    for row in 0..height {
-        for col in 0..width {
-            let char = grid[row][col];
+    for (r, row) in level.iter().enumerate().take(height) {
+        for (c, &byte) in row.as_bytes().iter().enumerate() {
+            let char = byte as char;
+            grid[r][c] = char;
 
-            let row = row as i8;
-            let col = col as i8;
+            let irow = r as i8;
+            let icol = c as i8;
             match char {
-                '@' | '+' => player = (row, col),
-                '$' | '*' => boxes.push((row, col)),
+                '@' | '+' => player = (irow, icol),
+                '$' | '*' => boxes.push((irow, icol)),
                 _ => {}
             }
             if matches!(char, '.' | '*' | '+') {
-                goals.push((row, col));
+                goals.push((irow, icol));
             }
         }
     }
