@@ -1,12 +1,13 @@
 use sokoban_solver::solve;
 
+// num_node: 33_877_811
+// rUdldRddrruuLrddlluUrrdLulUdrddlUUlLddlluuRRddlUruRldlluRRuruLuulldRurDDDuulldRurDrRRUruulldDrdLurrrdLuuLdldLrurrdLuuulDrddLruulD
+//
+// Laptop               Desktop
+// real    10m5.144s    real	5m31.055s
+// user    10m1.015s    user	5m29.399s
+// sys     0m0.457s     sys	0m0.488s
 fn main() {
-    // num_node: 33_877_811
-    // rUdldRddrruuLrddlluUrrdLulUdrddlUUlLddlluuRRddlUruRldlluRRuruLuulldRurDDDuulldRurDrRRUruulldDrdLurrrdLuuLdldLrurrdLuuulDrddLruulD
-    //
-    // real    10m5.144s
-    // user    10m1.015s
-    // sys     0m0.457s
     let microban92 = &[
         " #########",
         "##   #   ##",
