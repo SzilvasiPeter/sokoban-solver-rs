@@ -11,6 +11,7 @@ type BoxOrGoal = SmallVec<[Pos; 15]>;
 type Grid = [[char; MAX_SIZE]; MAX_SIZE];
 type BoolGrid = [[bool; MAX_SIZE]; MAX_SIZE];
 type PathGrid = [[u8; MAX_SIZE]; MAX_SIZE];
+type DistanceMap = [[u16; MAX_SIZE]; MAX_SIZE];
 
 const MAX_SIZE: usize = 127;
 const DIRECTIONS: [(i8, i8, u8); 4] = [(1, 0, b'D'), (-1, 0, b'U'), (0, 1, b'R'), (0, -1, b'L')];
@@ -20,16 +21,18 @@ struct State {
     boxes: BoxOrGoal,
     player: Pos,
     pushes: SmallVec<[u8; 128]>, // Now stores: PlayerPath + PushDir
-    cost: usize,                 // Number of pushes made so far
-    priority: usize,             // cost + heuristic
+    cost: u16,                   // Number of pushes made so far
+    priority: u16,               // cost + heuristic
 }
 
-// We need Ord for BinaryHeap to work as a Priority Queue
+// Tie-Breaking optimization If Priority (F) is equal, prefer higher Cost (G).
+// This makes A* behave like Depth-First Search on ties, finding solutions faster.
 impl Ord for State {
     fn cmp(&self, other: &Self) -> Ordering {
-        // Rust's BinaryHeap is a max-heap, so we reverse the comparison
-        // to get the smallest priority (min-heap behavior).
-        other.priority.cmp(&self.priority)
+        match other.priority.cmp(&self.priority) {
+            Ordering::Equal => self.cost.cmp(&other.cost),
+            ord => ord,
+        }
     }
 }
 
@@ -95,6 +98,11 @@ pub fn solve(level: &[&str]) -> Option<String> {
     let mut came_from: PathGrid = [[0; MAX_SIZE]; MAX_SIZE];
     let mut queue_buf: VecDeque<Pos> = VecDeque::new();
 
+    let mut goal_maps: Vec<DistanceMap> = Vec::with_capacity(goals.len());
+    for &goal_pos in &goals {
+        goal_maps.push(compute_distance_map(goal_pos, &grid));
+    }
+
     // SETUP A* SEARCH
     // Buffer 2: Temporary buffer for calculating normalized player in FUTURE states
     let mut visited: AHashSet<(BoxOrGoal, Pos)> = AHashSet::with_capacity(65536);
@@ -112,7 +120,8 @@ pub fn solve(level: &[&str]) -> Option<String> {
     );
     visited.insert((initial_boxes.clone(), norm_player));
 
-    let initial_h = heuristic(&initial_boxes, &goals);
+    let initial_h = heuristic_greedy_match(&initial_boxes, &goal_maps);
+    // let initial_h = heuristic(&initial_boxes, &goal_maps);
 
     queue.push(State {
         boxes: initial_boxes,
@@ -191,7 +200,11 @@ pub fn solve(level: &[&str]) -> Option<String> {
                 new_pushes.push(push_ch); // Append the actual box push
 
                 let new_cost = state.cost + 1;
-                let h = heuristic(&new_boxes, &goals);
+
+                let h = heuristic_greedy_match(&new_boxes, &goal_maps);
+                if h == u16::MAX {
+                    continue;
+                }
 
                 queue.push(State {
                     boxes: new_boxes,
@@ -207,20 +220,83 @@ pub fn solve(level: &[&str]) -> Option<String> {
     None
 }
 
-// 1. Heuristic: Sum of Manhattan distances from every box to its nearest goal
-fn heuristic(boxes: &BoxOrGoal, goals: &BoxOrGoal) -> usize {
-    let mut total = 0;
-    for &(br, bc) in boxes {
-        let mut min = usize::MAX;
-        for &(gr, gc) in goals {
-            let dist = (br - gr).abs() + (bc - gc).abs();
-            if (dist as usize) < min {
-                min = dist as usize;
+// Instead of just summing distances, we ensure no two boxes count the same goal.
+fn heuristic_greedy_match(boxes: &BoxOrGoal, distance_maps: &[DistanceMap]) -> u16 {
+    // 1. Collect all possible pairings (distance, box_index, map_index)
+    // Capacity: 15 boxes * 15 goals = 225 max edges. Stack allocation is fine.
+    let mut edges: SmallVec<[(u16, u8, u8); 128]> = SmallVec::new();
+
+    for (b_idx, &(br, bc)) in boxes.iter().enumerate() {
+        for (m_idx, map) in distance_maps.iter().enumerate() {
+            let d = map[br as usize][bc as usize];
+            if d != u16::MAX {
+                edges.push((d, b_idx as u8, m_idx as u8));
             }
         }
-        total += min;
     }
-    total
+
+    // 2. Sort edges by distance (cheapest moves first)
+    edges.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    let mut total_cost: u16 = 0;
+    let mut matched_boxes = 0u16; // Bitmask for boxes (max 15)
+    let mut taken_goals = 0u16; // Bitmask for goals (max 15)
+    let box_count = boxes.len();
+
+    // 3. Greedily assign
+    for (dist, b_idx, m_idx) in edges {
+        let b_mask = 1 << b_idx;
+        let g_mask = 1 << m_idx;
+
+        // If this box and this goal are both free, take them
+        if (matched_boxes & b_mask) == 0 && (taken_goals & g_mask) == 0 {
+            total_cost += dist;
+            matched_boxes |= b_mask;
+            taken_goals |= g_mask;
+
+            // Optimization: Stop if all boxes matched
+            if matched_boxes.count_ones() as usize == box_count {
+                return total_cost;
+            }
+        }
+    }
+
+    // If we couldn't match every box to a unique goal, this is a DEAD STATE.
+    // (e.g., 2 boxes trapped in a tunnel with only 1 goal accessible)
+    u16::MAX
+}
+
+// BFS to fill DistanceMap
+fn compute_distance_map(goal: Pos, grid: &Grid) -> DistanceMap {
+    let mut dist_map = [[u16::MAX; MAX_SIZE]; MAX_SIZE];
+    let mut queue = VecDeque::new();
+
+    let (gr, gc) = goal;
+    dist_map[gr as usize][gc as usize] = 0;
+    queue.push_back(goal);
+
+    while let Some((r, c)) = queue.pop_front() {
+        let current_dist = dist_map[r as usize][c as usize];
+        if current_dist == u16::MAX - 1 {
+            continue;
+        }
+
+        for (dr, dc, _) in DIRECTIONS {
+            let nr = r + dr;
+            let nc = c + dc;
+            let (unr, unc) = (nr as usize, nc as usize);
+
+            if unr < MAX_SIZE
+                && unc < MAX_SIZE
+                && grid[unr][unc] != '#'
+                && dist_map[unr][unc] == u16::MAX
+            {
+                dist_map[unr][unc] = current_dist + 1;
+                queue.push_back((nr, nc));
+            }
+        }
+    }
+    dist_map
 }
 
 // 2. Player Normalization

@@ -61,7 +61,7 @@ fn test_boring2() {
         "#######", "#  .+.#", "#.*.####", "# $ $..#", "# $#$$ #", "#*$ $  #", "#      #",
         "########",
     ];
-    let expected = "lddRRDrddlUdlluRdlllUUURlddRluurDuRuullDRdrUluRddldlddrUUddrruLdlluurUruuRllldRdrUluRddldlddrUUddrrrruLLLdlluurUruulldRddlddrUUUrRllUluRddrrDulldddrrruLLrrruLddlllluururrDrdLdllluuUdddrUUddrruLdlluurUrrddlL";
+    let expected = "lddRRDrddlUdllllUUURldddrruRdllluuurRllddRluurruullDRdDlddrUUUUluRdddlUrrRlldddrruLLuuuuRRllddrUluRddldddrrrruLLLdlUUUrrDulldddrrruruLddlluluuruullDRddddrrruLLdlUUUUluRdddlUrrrDrdLLdlUUU";
 
     let actual = solve(level).expect("No solution found");
     assert_eq!(actual, expected);
